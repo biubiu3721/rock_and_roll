@@ -2,7 +2,7 @@ from data.read_excel import *
 import numpy as np
 import torch
 import torch.nn as nn
-from model import Net
+from model import *
 import torch.optim as optim
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
@@ -66,63 +66,68 @@ class RockData:
                                 self.total_labels[valid_ids])
             self.folders.append(TrainValidSet(train_set, valid_set))
 
+
+def min_max_scaler(data):
+    data = data.reshape(data.shape[0], -1)
+    for i in range(data.shape[1]):
+
+        print("min_max_scaler")
+        amin = np.min(data[:, i])
+        amax = np.max(data[:, i])
+        print(" min, max", amin, amax)
+        data[:, i] = (data[:, i] - amin)/(amax-amin)
+    return data
+
 def train(train_valid_data):
     PATH = './model.pth'
-    batch_size = 64
-    shuffle = True
-    lr = 0.00001
-    momentum = 0
-    value = torch.from_numpy(train_valid_data.train_set.data)
-    targets = torch.from_numpy(train_valid_data.train_set.targets)
+    batch_size = 32
+    shuffle = False
+    value = torch.from_numpy(min_max_scaler(train_valid_data.train_set.data))
+    targets = torch.from_numpy(min_max_scaler(train_valid_data.train_set.targets))
     torch_dataset = Data.TensorDataset(value, targets)
     tor_train_set = DataLoader(torch_dataset, batch_size=batch_size)
-    net = Net()
-    for name, parameters in net.named_parameters():  # 打印出每一层的参数的大小
-        print(name, ':', parameters, ":", parameters.size())
+    input_dim = 7
+    output_dim = 1
+    net = LinearRegressionModel(input_dim, output_dim)
     criterion = nn.MSELoss()
 
-    optimizer = torch.optim.SGD(net.parameters(), lr=lr)
+    optimizer = torch.optim.SGD(net.parameters(), lr=net.hyper["lr"],  momentum=net.hyper["momentum"])
     loss_set = []
-    for epoch in range(12):
+    for epoch in range(1000):
         running_loss = 0.0
-        net.train()
         for i, [inputs, labels] in enumerate(tor_train_set):
-
-            print("inputs:", inputs, inputs.shape)
-            print("labels:", labels, labels.shape)
+            optimizer.zero_grad()
             outputs = net(inputs)
             loss = criterion(outputs, labels)
-            #print("inputs", inputs)
-            #print("labels", labels)
-            #print("outputs", outputs)
-            #print("labels", labels)
-            # for parameters in net.parameters():
-            #     print(parameters)
-            #print("labels", labels)
-
-            print(loss.item())
-            optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-
-            running_loss += loss.item()
             loss_set.append(loss.item())
-            #print(f'[{epoch + 1}, {i + 1:5d}] loss: {running_loss:.3f}')
-            running_loss = 0
+        if epoch % 200 == 0:
+            print(loss.item())
+            print(f'[{epoch}] loss: {loss.item():.5f}')
     print('Finished Training')
-    for name, parameters in net.named_parameters():  # 打印出每一层的参数的大小
-        print(name, ':', parameters, ":", parameters.size())
 
-
+    # test
+    x = min_max_scaler(train_valid_data.valid_set.data)
+    y = min_max_scaler(train_valid_data.valid_set.targets).reshape(-1)
+    y_ = net(torch.from_numpy(x)).data.numpy().reshape(-1)
+    idx = np.argsort(y)
+    y = y[idx]
+    y_ = y_[idx]
+    print(y, y_)
+    plt.plot(y)
+    plt.plot(y_)
     torch.save(net.state_dict(), PATH)
-
-    plt.plot(loss_set)
+    # print(loss_set)
+    # plt.plot(loss_set)
     plt.show()
+
+
 if __name__ == "__main__":
     data_file = "./data/data_493.xlsx"
     sample = read_excel(data_file)
 
     rock_data_inst = RockData(sample)
-    rock_data_inst.get_random_set(int(493 * 0.8))
+    rock_data_inst.get_random_set(int(493 * 0.9))
     rock_data_inst.fold_samples(5)
     train(rock_data_inst.folders[0])
